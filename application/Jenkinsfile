@@ -65,19 +65,25 @@ pipeline {
             }
         } 
 
-        stage('Build Image') {
+       stage('Build Image') {
             steps {
-                script{
-                    withAWS(region:'us-east-1',credentials:'aws-creds') {
-                        sh """
-                            aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin ${ACC_ID}.dkr.ecr.us-east-1.amazonaws.com
-                            docker build -t ${ACC_ID}.dkr.ecr.us-east-1.amazonaws.com/${PROJECT}/${COMPONENT}:${appVersion} .
-                            docker push ${ACC_ID}.dkr.ecr.us-east-1.amazonaws.com/${PROJECT}/${COMPONENT}:${appVersion}
-                        """
-                    }
-                }
+               script {
+            withCredentials([usernamePassword(
+                    credentialsId: 'docker-creds',
+                    usernameVariable: 'DOCKER_USER',
+                     passwordVariable: 'DOCKER_PASS'
+            )]) {
+                sh """
+                    echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin
+
+                    docker build -t $DOCKER_USER/${PROJECT}-${COMPONENT}:${appVersion} .
+
+                    docker push $DOCKER_USER/${PROJECT}-${COMPONENT}:${appVersion}
+                """
             }
         }
+    }
+}
 
         stage('Deploy to EKS') {
             steps {
@@ -90,10 +96,8 @@ pipeline {
                             # Verify cluster
                             kubectl get nodes
 
-                            # Update deployment image
-                            kubectl set image deployment/${COMPONENT} \
-                            ${COMPONENT}=${ACC_ID}.dkr.ecr.us-east-1.amazonaws.com/${PROJECT}/${COMPONENT}:${appVersion} \
-                            -n ${PROJECT}
+                            # Apply Kubernetes manifests
+                            kubectl apply -f k8s/manifest.yaml
 
                             # Wait for rollout
                             kubectl rollout status deployment/${COMPONENT} -n ${PROJECT}
